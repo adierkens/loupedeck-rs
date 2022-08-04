@@ -1,0 +1,16 @@
+[package]
+name = "loupedeck"
+version = "0.0.0"
+authors = ["Adam Dierkens <adam@dierkens.com>"]
+edition = "2021"
+license = "MIT"
+description = "Loupedeck serial drivers in rust"
+repository = "https://github.com/adierkens/loupedeck-rs/"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serialport = "4.2.0"
+tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+rustc_version = "0.2.3"

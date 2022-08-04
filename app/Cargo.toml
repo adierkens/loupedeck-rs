@@ -1,0 +1,9 @@
+[package]
+name = "loupedeck-conf-app"
+version = "0.0.0"
+authors = ["Adam Dierkens <adam@dierkens.com>"]
+edition = "2021"
+
+[dependencies]
+
+[build-dependencies]
