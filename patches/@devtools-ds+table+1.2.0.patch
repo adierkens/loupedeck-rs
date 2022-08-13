@@ -1,0 +1,9 @@
+diff --git a/node_modules/@devtools-ds/table/dist/esm/Table.css.js b/node_modules/@devtools-ds/table/dist/esm/Table.css.js
+index e8e54ad..e817213 100644
+--- a/node_modules/@devtools-ds/table/dist/esm/Table.css.js
++++ b/node_modules/@devtools-ds/table/dist/esm/Table.css.js
+@@ -1 +1 @@
+-module.exports = {"table":"Table-table-d604ac5","table-head":"Table-table-head-ae0d0f2","tableHead":"Table-table-head-ae0d0f2","cell-head":"Table-cell-head-130089b","cellHead":"Table-cell-head-130089b","content":"Table-content-f1eb194","resize":"Table-resize-f86c69b","active":"Table-active-eede509","cell":"Table-cell-c72d7e9","row":"Table-row-401b168","interactive":"Table-interactive-6a697df","dark":"Table-dark-305ff88","chrome":"Table-chrome-89b5029","light":"Table-light-978e9e8"};
+\ No newline at end of file
++export default {"table":"Table-table-d604ac5","table-head":"Table-table-head-ae0d0f2","tableHead":"Table-table-head-ae0d0f2","cell-head":"Table-cell-head-130089b","cellHead":"Table-cell-head-130089b","content":"Table-content-f1eb194","resize":"Table-resize-f86c69b","active":"Table-active-eede509","cell":"Table-cell-c72d7e9","row":"Table-row-401b168","interactive":"Table-interactive-6a697df","dark":"Table-dark-305ff88","chrome":"Table-chrome-89b5029","light":"Table-light-978e9e8"};
+\ No newline at end of file

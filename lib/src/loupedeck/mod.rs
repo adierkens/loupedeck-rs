@@ -4,8 +4,11 @@ use std::io::Result;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc;
+use tokio::time;
+use tokio_serial::SerialPortBuilderExt;
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[repr(u16)]
 pub enum MessageHeader {
     Confirm = 0x0302,
@@ -140,15 +143,15 @@ impl Knob {
 #[derive(Debug, Serialize, Clone)]
 #[repr(u8)]
 pub enum PressDirection {
-    Down = 0x00,
-    Up = 0x01,
+    Up = 0x00,
+    Down = 0x01,
 }
 
 impl PressDirection {
     pub fn from_u8(value: u8) -> Option<PressDirection> {
         match value {
-            0x00 => Some(PressDirection::Up),
-            0x01 => Some(PressDirection::Down),
+            0x00 => Some(PressDirection::Down),
+            0x01 => Some(PressDirection::Up),
             _ => None,
         }
     }
@@ -185,7 +188,7 @@ pub enum Event {
     TouchEvent(TouchEvent),
 }
 
-fn parse_serial_message(message: &[u8]) -> Result<Event> {
+fn parse_serial_message(message: &[u8]) -> Result<Option<Event>> {
     let header: u16 = u16::from_be_bytes([message[0], message[1]]);
     let message_type = MessageHeader::from_u16(header).expect("Invalid header type");
     let tx_id = message[2];
@@ -194,15 +197,19 @@ fn parse_serial_message(message: &[u8]) -> Result<Event> {
         MessageHeader::ButtonPress => {
             let button = Button::from_u8(message[3]).expect("Invalid button address");
             let dir = PressDirection::from_u8(message[4]).expect("Invalid button direction");
-            Ok(Event::ButtonPress(ButtonPressEvent { button, dir, tx_id }))
+            Ok(Some(Event::ButtonPress(ButtonPressEvent {
+                button,
+                dir,
+                tx_id,
+            })))
         }
         MessageHeader::KnobRotate => {
             let knob = Knob::from_u8(message[3]).expect("Invalid knob address");
-            Ok(Event::KnobRotate(KnobRotateEvent {
+            Ok(Some(Event::KnobRotate(KnobRotateEvent {
                 tx_id,
                 knob,
                 value: message[4] as i8,
-            }))
+            })))
         }
         MessageHeader::TouchDown | MessageHeader::TouchUp => {
             let x = u16::from_be_bytes([message[4], message[5]]);
@@ -215,15 +222,16 @@ fn parse_serial_message(message: &[u8]) -> Result<Event> {
             };
             let screen = Screen::from_x_coor(x).expect("Invalid screen");
 
-            Ok(Event::TouchEvent(TouchEvent {
+            Ok(Some(Event::TouchEvent(TouchEvent {
                 tx_id,
                 dir,
                 x,
                 y,
                 touch_id,
                 screen,
-            }))
+            })))
         }
+        MessageHeader::SetVibration => Ok(None),
         _ => {
             println!("unknown header: {:02x}", header);
             print!("message: ");
@@ -231,11 +239,7 @@ fn parse_serial_message(message: &[u8]) -> Result<Event> {
                 print!("{:02x}", m);
             }
             println!("");
-            Ok(Event::ButtonPress(ButtonPressEvent {
-                tx_id,
-                button: Button::Home,
-                dir: PressDirection::Up,
-            }))
+            return Ok(None);
         }
     }
 }
@@ -252,82 +256,161 @@ Sec-WebSocket-Key: 123abc
 
 pub struct Device {
     pub port: String,
-    runtime: Option<Runtime>,
+    runtime: Runtime,
+    message_channel: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
+    // serial_port: Option<tokio_serial::SerialStream>,
 }
 
 impl Device {
     pub fn new(port: String) -> Device {
         Device {
             port,
-            runtime: Some(Runtime::new().unwrap()),
+            runtime: Runtime::new().unwrap(),
+            message_channel: None,
         }
     }
 
-    pub fn connect(&self, on_event: Option<Box<dyn Fn(Event) + Send + Sync + 'static>>) {
+    pub fn connect(&mut self, on_event: Option<Box<dyn Fn(Event) + Send + Sync + 'static>>) {
         println!("Connecting to Loupedeck on port {}", self.port);
 
-        let mut port = serialport::new(&self.port, 9600)
-            .open()
-            .expect("Failed to open port");
-
-        println!("Connected to Loupedeck on port {}", self.port);
-
-        port.write(WS_UPGRADE_HEADER.as_bytes())
-            .expect("Failed to write to port");
-        self.poll(Mutex::new(port), Mutex::new(on_event));
+        // self.serial_port = Some(serial_port);
+        self.poll(Mutex::new(on_event));
     }
 
     pub fn disconnect(&mut self) {
+        // self.runtime.shutdown_timeout(Duration::from_millis(100));
         println!("Disconnecting from Loupedeck on port {}", self.port);
-
-        let runtime = self.runtime.take();
-
-        runtime
-            .expect("Foo")
-            .shutdown_timeout(Duration::from_millis(100));
     }
 
-    fn poll(
-        &self,
-        port_mutex: Mutex<Box<dyn serialport::SerialPort>>,
-        on_event_mutex: Mutex<Option<Box<dyn Fn(Event) + Send + Sync + 'static>>>,
-    ) {
-        match &self.runtime {
-            Some(runtime) => {
-                runtime.spawn(async move {
-                    loop {
-                        let mut port = port_mutex.lock().expect("Failed to lock port");
+    pub fn vibrate(&self) {
+        let mut vib_header = Vec::new();
+        vib_header.push(0x04);
+        vib_header.push(0x1b);
 
-                        let mut single_byte: Vec<u8> = vec![0; 1];
+        let mut data = Vec::new();
+        data.push(0x0A);
+
+        self.send_message(vib_header, data, false)
+    }
+
+    pub fn send_message(&self, action: Vec<u8>, data: Vec<u8>, track: bool) {
+        let mut header: Vec<u8> = Vec::with_capacity(3);
+        header.push(action[0]);
+        header.push(action[1]);
+        header.push(3);
+
+        let mut message: Vec<u8> = Vec::with_capacity(header.len() + data.len());
+        message.extend_from_slice(&header);
+        message.extend_from_slice(&data);
+
+        self.send(message, false);
+    }
+
+    pub fn send(&self, message_buffer: Vec<u8>, raw: bool) {
+        if !raw {
+            let mut prefix_buff: Vec<u8>;
+
+            if message_buffer.len() > 0xff {
+                prefix_buff = Vec::with_capacity(14);
+
+                for i in 0..14 {
+                    prefix_buff.push(0x00);
+                }
+
+                prefix_buff[0] = 0x82;
+                prefix_buff[1] = 0xFF;
+
+                let len = (message_buffer.len() as u32).to_be();
+                let offset = 7;
+                prefix_buff[2 + offset] = (len >> 24) as u8;
+                prefix_buff[3 + offset] = (len >> 16) as u8;
+                prefix_buff[4 + offset] = (len >> 8) as u8;
+                prefix_buff[5 + offset] = len as u8;
+            } else {
+                prefix_buff = Vec::with_capacity(6);
+
+                for i in 0..6 {
+                    prefix_buff.push(0x00);
+                }
+
+                prefix_buff[0] = 0x82;
+                prefix_buff[1] = 0x80 + message_buffer.len() as u8;
+            }
+
+            if self.message_channel.is_some() {
+                let tx = self.message_channel.as_ref().unwrap().clone();
+
+                let mut message = Vec::with_capacity(prefix_buff.len() + message_buffer.len());
+                message.extend_from_slice(&prefix_buff);
+                message.extend_from_slice(&message_buffer);
+
+                self.runtime.spawn(async move {
+                    tx.send(message).await.unwrap();
+                });
+            }
+        }
+    }
+
+    fn poll(&mut self, on_event_mutex: Mutex<Option<Box<dyn Fn(Event) + Send + Sync + 'static>>>) {
+        let (tx, mut rx) = mpsc::channel(100);
+        self.message_channel = Some(tx);
+
+        let cloned = self.port.clone();
+
+        self.runtime.spawn(async move {
+            let mut port = tokio_serial::new(cloned.as_str(), 9600)
+                .open_native_async()
+                .expect("Failed to open port");
+
+            println!("Connected to Loupedeck on port {}", cloned.as_str());
+
+            port.write(WS_UPGRADE_HEADER.as_bytes())
+                .expect("Failed to write to port");
+
+            loop {
+                // Send any pending messages
+
+                // Try to write everything we can from the port
+                while let Ok(message) = rx.try_recv() {
+                    port.write(message.as_slice())
+                        .expect("Failed to write to port");
+                }
+
+                loop {
+                    let mut single_byte: Vec<u8> = vec![0; 1];
+
+                    let res = port.read(single_byte.as_mut_slice());
+
+                    if res.is_err() {
+                        break;
+                    }
+
+                    if single_byte[0] == 0x82 {
+                        // Found delimiter
                         port.read(single_byte.as_mut_slice())
-                            .expect("Found no data!");
+                            .expect("Found no length data");
+                        let length = single_byte[0] as usize;
+                        // println!("Found message with length {}", length);
+                        let mut data: Vec<u8> = vec![0; length];
+                        port.read(data.as_mut_slice()).expect("Found no data!");
+                        let event = parse_serial_message(&data);
 
-                        if single_byte[0] == 0x82 {
-                            // Found delimiter
-                            port.read(single_byte.as_mut_slice())
-                                .expect("Found no length data");
-                            let length = single_byte[0] as usize;
-                            // println!("Found message with length {}", length);
-                            let mut data: Vec<u8> = vec![0; length];
-                            port.read(data.as_mut_slice()).expect("Found no data!");
-                            let event = parse_serial_message(&data);
+                        let on_event = on_event_mutex.lock().expect("Failed to lock on_event");
 
-                            let on_event = on_event_mutex.lock().expect("Failed to lock on_event");
-
-                            if event.is_ok() {
-                                let event = event.unwrap();
-                                if let Some(on_event) = on_event.as_ref() {
-                                    on_event(event);
+                        if event.is_ok() {
+                            let event = event.unwrap();
+                            if let Some(on_event) = on_event.as_ref() {
+                                if event.is_some() {
+                                    on_event(event.unwrap());
                                 }
                             }
                         }
                     }
-                });
+                }
+
+                time::sleep(time::Duration::from_millis(1)).await
             }
-            None => {
-                println!("No runtime");
-            }
-        }
+        });
     }
 }
 
@@ -336,11 +419,11 @@ const LOUPEDECK_VENDOR_ID: u16 = 11970;
 pub fn get_loupedeck_ports() -> Vec<String> {
     let mut ports = Vec::new();
 
-    serialport::available_ports()
+    tokio_serial::available_ports()
         .unwrap()
         .iter()
         .for_each(|port| {
-            if let serialport::SerialPortType::UsbPort(port_info) = &port.port_type {
+            if let tokio_serial::SerialPortType::UsbPort(port_info) = &port.port_type {
                 if port_info.vid == LOUPEDECK_VENDOR_ID {
                     ports.push(port.port_name.to_string());
                 }
@@ -354,7 +437,7 @@ pub fn connect_loupedeck_device<F>(port: String, on_event: F) -> Device
 where
     F: Fn(Event) + Send + Sync + 'static,
 {
-    let loupedeck = Device::new(port);
+    let mut loupedeck = Device::new(port);
     loupedeck.connect(Some(Box::new(on_event)));
     return loupedeck;
 }

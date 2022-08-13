@@ -1,2 +1,2 @@
 [workspace]
-members = ["lib", "src-tauri"]
+members = ["lib", "src-tauri", "time-plugin"]

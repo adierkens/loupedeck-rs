@@ -1,0 +1,14 @@
+[package]
+name = "loupedeck_plugin_time"
+version = "0.0.0"
+authors = ["Adam Dierkens <adam@dierkens.com>"]
+edition = "2021"
+license = "MIT"
+description = "Loupedeck plugin to display time"
+repository = "https://github.com/adierkens/loupedeck-rs/"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+loupedeck = { path = "../lib" }

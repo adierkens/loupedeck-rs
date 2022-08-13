@@ -3,21 +3,24 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "dev": "vite",
+    "dev": "tauri dev",
+    "tauri-dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "postinstall": "patch-package"
   },
   "dependencies": {
-    "@chakra-ui/icons": "^2.0.4",
-    "@chakra-ui/react": "^2.2.4",
-    "@emotion/react": "11",
-    "@emotion/styled": "11",
+    "@devtools-ds/object-inspector": "^1.2.0",
+    "@devtools-ds/table": "^1.2.0",
+    "@rsuite/icons": "^1.0.2",
     "@tauri-apps/api": "^1.0.1",
-    "framer-motion": "6",
+    "framer-motion": "^7.0.0",
+    "patch-package": "^6.4.7",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "react-router-dom": "^6.3.0"
+    "react-router-dom": "^6.3.0",
+    "rsuite": "^5.16.4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.0.0",

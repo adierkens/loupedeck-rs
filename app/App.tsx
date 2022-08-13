@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import logo from "./logo.svg";
-import "./App.css";
+import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api";
 
 const list_ld_ports = async (): Promise<string[]> => {
@@ -10,11 +8,7 @@ const list_ld_ports = async (): Promise<string[]> => {
 
 import { listen } from "@tauri-apps/api/event";
 
-const unlisten = await listen("state-update", (evt) => {
-  console.log("state-update", evt);
-});
-
-await listen("event-update", (evt) => {
+listen("event-update", (evt) => {
   console.log("event", evt);
 });
 

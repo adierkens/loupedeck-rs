@@ -78,7 +78,10 @@ checksum = "c91f1f46651137be86f3a2b9a8359f9ab421d04d941c62b5982e1ca21113adf9"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "libloading 0.5.2",
  "loupedeck",
+ "platform-dirs",
+ "serde",
  "tauri",
  "tauri-build",
 ]
@@ -564,6 +567,16 @@ checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
  "block-buffer",
  "crypto-common",
+]
+
+[[package]]
+name = "dirs-next"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf36e65a80337bea855cd4ef9b8401ffce06a7baedf2e85ec467b1ac3f6e82b6"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
 ]
 
 [[package]]
@@ -1382,7 +1395,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1b3b6681973cea8cc3bce7391e6d7d5502720b80a581c9a95c9cbaf592826aa"
 dependencies = [
  "gtk-sys",
- "libloading",
+ "libloading 0.7.3",
  "once_cell",
 ]
 
@@ -1403,32 +1416,22 @@ dependencies = [
 
 [[package]]
 name = "libloading"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b111a074963af1d37a139918ac6d49ad1d0d5e47f72fd55388619691a7d753"
+dependencies = [
+ "cc",
+ "winapi",
+]
+
+[[package]]
+name = "libloading"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "efbc0f03f9a775e9f6aed295c6a1ba2253c5757a9e03d55c6caa46a681abcddd"
 dependencies = [
  "cfg-if",
  "winapi",
-]
-
-[[package]]
-name = "libudev"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78b324152da65df7bb95acfcaab55e3097ceaab02fb19b228a9eb74d55f135e0"
-dependencies = [
- "libc",
- "libudev-sys",
-]
-
-[[package]]
-name = "libudev-sys"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c8469b4a23b962c1396b9b451dda50ef5b283e8dd309d69033475fa9b334324"
-dependencies = [
- "libc",
- "pkg-config",
 ]
 
 [[package]]
@@ -1478,10 +1481,18 @@ dependencies = [
 name = "loupedeck"
 version = "0.0.0"
 dependencies = [
+ "mio-serial",
  "rustc_version 0.2.3",
  "serde",
- "serialport",
  "tokio",
+ "tokio-serial",
+]
+
+[[package]]
+name = "loupedeck_plugin_time"
+version = "0.0.0"
+dependencies = [
+ "loupedeck",
 ]
 
 [[package]]
@@ -1497,7 +1508,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fff231a88fe2e9985f9d159a2f02986fe46daa0f6af976a0d934be4870cc9d02"
 dependencies = [
  "cc",
- "dirs-next",
+ "dirs-next 2.0.0",
  "objc-foundation",
  "objc_id",
  "time",
@@ -1596,6 +1607,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mio-serial"
+version = "5.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "531e0f6dc55a5aa7b8d320407c5c4ced464e23815c60f6a1e6d9e225d2b45905"
+dependencies = [
+ "log",
+ "mio",
+ "nix 0.23.1",
+ "serialport",
+ "winapi",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,6 +1670,19 @@ name = "new_debug_unreachable"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
+
+[[package]]
+name = "nix"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f866317acbd3a240710c63f065ffb1e4fd466259045ccb504130b7f668f35c6"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+ "memoffset",
+]
 
 [[package]]
 name = "nix"
@@ -2074,6 +2111,15 @@ name = "pkg-config"
 version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1df8c4ec4b0627e53bdf214615ad287367e482558cf84b109250b37464dc03ae"
+
+[[package]]
+name = "platform-dirs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e188d043c1a692985f78b5464853a263f1a27e5bd6322bad3a4078ee3c998a38"
+dependencies = [
+ "dirs-next 1.0.2",
+]
 
 [[package]]
 name = "plist"
@@ -2623,9 +2669,8 @@ dependencies = [
  "IOKit-sys",
  "bitflags",
  "cfg-if",
- "libudev",
  "mach 0.3.2",
- "nix",
+ "nix 0.24.2",
  "regex",
  "winapi",
 ]
@@ -2856,7 +2901,7 @@ dependencies = [
  "core-foundation",
  "core-graphics",
  "crossbeam-channel",
- "dirs-next",
+ "dirs-next 2.0.0",
  "dispatch",
  "gdk",
  "gdk-pixbuf",
@@ -2911,7 +2956,7 @@ dependencies = [
  "anyhow",
  "attohttpc",
  "cocoa",
- "dirs-next",
+ "dirs-next 2.0.0",
  "embed_plist",
  "flate2",
  "futures",
@@ -3195,6 +3240,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio-serial"
+version = "5.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5488e0c75c70e880823aebc3ad4ac0a6da6f48d95bc1b9a52bd3200d6f1e724"
+dependencies = [
+ "cfg-if",
+ "futures",
+ "log",
+ "mio-serial",
+ "tokio",
 ]
 
 [[package]]

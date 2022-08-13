@@ -29,9 +29,16 @@ pub trait ButtonPlugin {
     fn on_change(&self, position: loupedeck::ButtonPressEvent) -> Result<()>;
 }
 
+pub trait ScreenPlugin {
+    fn create(&self, position: loupedeck::Screen) -> Result<()>;
+    fn destroy(&self, position: loupedeck::Screen) -> Result<()>;
+    fn on_touch(&self, position: loupedeck::TouchEvent) -> Result<()>;
+}
+
 pub trait PluginRegistrar {
-    fn register_knob(&self, name: &str, plugin: Box<dyn KnobPlugin>);
-    fn register_button(&self, name: &str, plugin: Box<dyn ButtonPlugin>);
+    fn register_knob(&mut self, name: &str, plugin: Box<dyn KnobPlugin>);
+    fn register_button(&mut self, name: &str, plugin: Box<dyn ButtonPlugin>);
+    fn register_screen(&mut self, name: &str, plugin: Box<dyn ScreenPlugin>);
 }
 
 #[derive(Copy, Clone)]
