@@ -9,10 +9,13 @@ repository = "https://github.com/adierkens/loupedeck-rs/"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-# serialport = "4.2.0"
 tokio-serial = "5.4.3"
 mio-serial = "5.0.2"
 tokio = { version = "1", features = ["full"] }
+
+# test stuff
+raqote = { version = "0.8.1", features = ["text"] }
+font-kit = "0.10.1"
 
 [build-dependencies]
 rustc_version = "0.2.3"

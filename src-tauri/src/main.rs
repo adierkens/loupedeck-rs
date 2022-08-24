@@ -7,9 +7,8 @@
 static ALLOCATOR: System = System;
 
 use libloading::Library;
-use loupedeck::PluginDeclaration;
 use loupedeck::{
-    loupedeck::connect_loupedeck_device, loupedeck::get_loupedeck_ports, ButtonPlugin, KnobPlugin,
+    connect_loupedeck_device, get_loupedeck_ports, ButtonPlugin, KnobPlugin, PluginDeclaration,
     ScreenPlugin,
 };
 use platform_dirs::AppDirs;
@@ -40,43 +39,43 @@ pub struct KnobPluginProxy {
 }
 
 impl KnobPlugin for KnobPluginProxy {
-    fn create(&self, position: loupedeck::loupedeck::Knob) -> Result<()> {
+    fn create(&self, position: loupedeck::Knob) -> Result<()> {
         self.plugin.create(position)
     }
 
-    fn destroy(&self, position: loupedeck::loupedeck::Knob) -> Result<()> {
+    fn destroy(&self, position: loupedeck::Knob) -> Result<()> {
         self.plugin.destroy(position)
     }
 
-    fn on_change(&self, position: loupedeck::loupedeck::KnobRotateEvent) -> Result<&str> {
+    fn on_change(&self, position: loupedeck::KnobRotateEvent) -> Result<&str> {
         self.plugin.on_change(position)
     }
 }
 
 impl ButtonPlugin for ButtonPluginProxy {
-    fn create(&self, position: loupedeck::loupedeck::Button) -> Result<()> {
+    fn create(&self, position: loupedeck::Button) -> Result<()> {
         self.plugin.create(position)
     }
 
-    fn destroy(&self, position: loupedeck::loupedeck::Button) -> Result<()> {
+    fn destroy(&self, position: loupedeck::Button) -> Result<()> {
         self.plugin.destroy(position)
     }
 
-    fn on_change(&self, position: loupedeck::loupedeck::ButtonPressEvent) -> Result<()> {
+    fn on_change(&self, position: loupedeck::ButtonPressEvent) -> Result<()> {
         self.plugin.on_change(position)
     }
 }
 
 impl ScreenPlugin for ScreenPluginProxy {
-    fn create(&self, position: loupedeck::loupedeck::Screen) -> Result<()> {
+    fn create(&self, position: loupedeck::Screen) -> Result<()> {
         self.plugin.create(position)
     }
 
-    fn destroy(&self, position: loupedeck::loupedeck::Screen) -> Result<()> {
+    fn destroy(&self, position: loupedeck::Screen) -> Result<()> {
         self.plugin.destroy(position)
     }
 
-    fn on_touch(&self, position: loupedeck::loupedeck::TouchEvent) -> Result<()> {
+    fn on_touch(&self, position: loupedeck::TouchEvent) -> Result<()> {
         self.plugin.on_touch(position)
     }
 }
@@ -169,7 +168,7 @@ impl ExternalPlugins {
 }
 
 struct ConnectionState {
-    connected_ld: Mutex<Option<loupedeck::loupedeck::Device>>,
+    connected_ld: Mutex<Option<loupedeck::Device>>,
     // external_plugins: Mutex<ExternalPlugins>,
 }
 
@@ -212,7 +211,7 @@ fn vibrate(state: tauri::State<ConnectionState>) {
 
         if ld.is_some() {
             let ldu = ld.as_ref().unwrap();
-            ldu.vibrate();
+            ldu.vibrate(loupedeck::Haptic::Low);
         }
     }
 }
@@ -350,7 +349,7 @@ mod plugins {
                         let plugin = plugins.screens.get(plugin_name);
                         if plugin.is_some() {
                             let plugin = plugin.unwrap();
-                            plugin.create(loupedeck::loupedeck::Screen::Center);
+                            plugin.create(loupedeck::Screen::Center);
                         }
                     }
                 });
@@ -369,4 +368,72 @@ fn main() {
     let app_builder = build_window(&context).plugin(plugins::init());
 
     app_builder.run(context);
+}
+
+mod ld_controller {
+    use std::{collections::HashMap, hash::Hash};
+
+    use loupedeck::ButtonPlugin;
+
+    use crate::PluginRegistrar;
+
+    struct PageConfig {
+        id: u16,
+        name: String,
+        buttons: HashMap<loupedeck::Button, String>,
+        knobs: HashMap<loupedeck::Knob, String>,
+        screens: HashMap<loupedeck::Screen, String>,
+    }
+
+    struct Page {
+        config: PageConfig,
+        name: String,
+        id: u16,
+        buttons: HashMap<loupedeck::Button, String>,
+        knobs: HashMap<loupedeck::Knob, String>,
+        screens: HashMap<loupedeck::Screen, String>,
+    }
+
+    impl Page {
+        fn new(config: PageConfig, registrar: PluginRegistrar) -> Page {
+            let buttons = HashMap::new();
+            let knobs = HashMap::new();
+            let screens = HashMap::new();
+
+            for (button, plugin_name) in config.buttons.iter() {
+                let plugin = registrar.buttons.get(plugin_name);
+                if plugin.is_some() {
+                    let plugin = plugin.unwrap();
+                    plugin.create(*button);
+                    buttons.insert(*button, plugin);
+                }
+            }
+
+            return Page {
+                name: config.name.clone(),
+                id: config.id.clone(),
+                buttons,
+                knobs,
+                screens,
+                config,
+            };
+        }
+    }
+
+    struct LDController {
+        ld: loupedeck::Device,
+        plugin_registrar: PluginRegistrar,
+        pages: HashMap<u16, Page>,
+    }
+
+    impl LDController {
+        fn new(ld: loupedeck::Device, plugin_registrar: PluginRegistrar) -> LDController {
+            let pages = HashMap::new();
+            return LDController {
+                ld,
+                plugin_registrar,
+                pages,
+            };
+        }
+    }
 }

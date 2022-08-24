@@ -1,196 +1,29 @@
-use serde::Serialize;
+use mio_serial::SerialPort;
 use std::io::prelude::*;
 use std::io::Result;
-use std::sync::Mutex;
-use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::join;
 use tokio::runtime::Runtime;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::oneshot::Sender;
 use tokio::time;
 use tokio_serial::SerialPortBuilderExt;
+use tokio_serial::SerialStream;
 
-#[derive(Debug, Clone, PartialEq)]
-#[repr(u16)]
-pub enum MessageHeader {
-    Confirm = 0x0302,
-    SerialOut = 0x0303,
-    VersionOut = 0x0307,
-    Tick = 0x0400,
-    SetBrightness = 0x0409,
-    ConfirmFrameBuffer = 0x0410,
-    SetVibration = 0x041b,
-    ButtonPress = 0x0500,
-    KnobRotate = 0x0501,
-    Reset = 0x0506,
-    SetColor = 0x0702,
-    TouchDown = 0x094d,
-    TouchUp = 0x096d,
-    VersionIn = 0x0c07,
-    MCU = 0x180d,
-    SerialIn = 0x1f03,
-    WriteFrameBuffer = 0xff10,
-}
+mod plugin;
+pub use plugin::*;
 
-impl MessageHeader {
-    pub fn from_u16(value: u16) -> Option<MessageHeader> {
-        match value {
-            0x0302 => Some(MessageHeader::Confirm),
-            0x0303 => Some(MessageHeader::SerialOut),
-            0x0307 => Some(MessageHeader::VersionOut),
-            0x0400 => Some(MessageHeader::Tick),
-            0x0409 => Some(MessageHeader::SetBrightness),
-            0x0410 => Some(MessageHeader::ConfirmFrameBuffer),
-            0x041b => Some(MessageHeader::SetVibration),
-            0x0500 => Some(MessageHeader::ButtonPress),
-            0x0501 => Some(MessageHeader::KnobRotate),
-            0x0506 => Some(MessageHeader::Reset),
-            0x0702 => Some(MessageHeader::SetColor),
-            0x094d => Some(MessageHeader::TouchDown),
-            0x096d => Some(MessageHeader::TouchUp),
-            0x0c07 => Some(MessageHeader::VersionIn),
-            0x180d => Some(MessageHeader::MCU),
-            0x1f03 => Some(MessageHeader::SerialIn),
-            0xff10 => Some(MessageHeader::WriteFrameBuffer),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[repr(u8)]
-pub enum Button {
-    Knob0 = 0x01,
-    Knob1 = 0x02,
-    Knob2 = 0x03,
-    Knob3 = 0x04,
-    Knob4 = 0x05,
-    Knob5 = 0x06,
-    Home = 0x07,
-    Circle1 = 0x08,
-    Circle2 = 0x09,
-    Circle3 = 0x0a,
-    Circle4 = 0x0b,
-    Circle5 = 0x0c,
-    Circle6 = 0x0d,
-    Circle7 = 0x0e,
-}
-
-impl Button {
-    pub fn from_u8(value: u8) -> Option<Button> {
-        match value {
-            0x01 => Some(Button::Knob0),
-            0x02 => Some(Button::Knob1),
-            0x03 => Some(Button::Knob2),
-            0x04 => Some(Button::Knob3),
-            0x05 => Some(Button::Knob4),
-            0x06 => Some(Button::Knob5),
-            0x07 => Some(Button::Home),
-            0x08 => Some(Button::Circle1),
-            0x09 => Some(Button::Circle2),
-            0x0a => Some(Button::Circle3),
-            0x0b => Some(Button::Circle4),
-            0x0c => Some(Button::Circle5),
-            0x0d => Some(Button::Circle6),
-            0x0e => Some(Button::Circle7),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[repr(u8)]
-pub enum Screen {
-    Left,
-    Center,
-    Right,
-}
-
-impl Screen {
-    pub fn from_x_coor(x: u16) -> Option<Screen> {
-        match x {
-            0..=60 => Some(Screen::Left),
-            61..=420 => Some(Screen::Center),
-            421..=480 => Some(Screen::Right),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[repr(u8)]
-pub enum Knob {
-    Knob0 = 0x01,
-    Knob1 = 0x02,
-    Knob2 = 0x03,
-    Knob3 = 0x04,
-    Knob4 = 0x05,
-    Knob5 = 0x06,
-}
-
-impl Knob {
-    pub fn from_u8(value: u8) -> Option<Knob> {
-        match value {
-            0x01 => Some(Knob::Knob0),
-            0x02 => Some(Knob::Knob1),
-            0x03 => Some(Knob::Knob2),
-            0x04 => Some(Knob::Knob3),
-            0x05 => Some(Knob::Knob4),
-            0x06 => Some(Knob::Knob5),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[repr(u8)]
-pub enum PressDirection {
-    Up = 0x00,
-    Down = 0x01,
-}
-
-impl PressDirection {
-    pub fn from_u8(value: u8) -> Option<PressDirection> {
-        match value {
-            0x00 => Some(PressDirection::Down),
-            0x01 => Some(PressDirection::Up),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct ButtonPressEvent {
-    pub tx_id: u8,
-    pub button: Button,
-    pub dir: PressDirection,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct KnobRotateEvent {
-    pub tx_id: u8,
-    pub knob: Knob,
-    pub value: i8,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct TouchEvent {
-    pub tx_id: u8,
-    pub dir: PressDirection,
-    pub touch_id: u8,
-    pub x: u16,
-    pub y: u16,
-    pub screen: Screen,
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub enum Event {
-    ButtonPress(ButtonPressEvent),
-    KnobRotate(KnobRotateEvent),
-    TouchEvent(TouchEvent),
-}
+mod constants;
+pub use constants::*;
 
 fn parse_serial_message(message: &[u8]) -> Result<Option<Event>> {
     let header: u16 = u16::from_be_bytes([message[0], message[1]]);
-    let message_type = MessageHeader::from_u16(header).expect("Invalid header type");
+    // println!("Message type: {:?}", header);
+
+    let message_type = MessageHeader::from(header);
     let tx_id = message[2];
 
     match message_type {
@@ -231,16 +64,36 @@ fn parse_serial_message(message: &[u8]) -> Result<Option<Event>> {
                 screen,
             })))
         }
-        MessageHeader::SetVibration => Ok(None),
-        _ => {
-            println!("unknown header: {:02x}", header);
-            print!("message: ");
-            for m in message.iter() {
-                print!("{:02x}", m);
-            }
-            println!("");
-            return Ok(None);
-        }
+        MessageHeader::SerialIn => Ok(Some(Event::SerialIn(SerialInEvent {
+            tx_id,
+            serial_number: String::from_utf8(message[3..].to_vec())
+                .unwrap()
+                .trim()
+                .to_string(),
+        }))),
+        MessageHeader::VersionIn => Ok(Some(Event::VersionIn(VersionInEvent {
+            tx_id,
+            version: format!("{}.{}.{}", message[3], message[4], message[5]).to_string(),
+        }))),
+        MessageHeader::ConfirmFrameBuffer => Ok(Some(Event::ConfirmFrameBufferIn(
+            ConfirmFrameBufferInEvent { tx_id },
+        ))),
+        MessageHeader::DrawIn => Ok(Some(Event::DrawIn(DrawInEvent { tx_id }))),
+        _ => Ok(Some(Event::Other(FallbackEvent { tx_id }))),
+    }
+}
+
+fn get_tx_id(evt: Event) -> Option<u8> {
+    match evt {
+        Event::ButtonPress(ButtonPressEvent { tx_id, .. }) => Some(tx_id),
+        Event::KnobRotate(KnobRotateEvent { tx_id, .. }) => Some(tx_id),
+        Event::TouchEvent(TouchEvent { tx_id, .. }) => Some(tx_id),
+        Event::Other(FallbackEvent { tx_id }) => Some(tx_id),
+        Event::SerialIn(SerialInEvent { tx_id, .. }) => Some(tx_id),
+        Event::VersionIn(VersionInEvent { tx_id, .. }) => Some(tx_id),
+        Event::ConfirmFrameBufferIn(ConfirmFrameBufferInEvent { tx_id }) => Some(tx_id),
+        Event::DrawIn(DrawInEvent { tx_id }) => Some(tx_id),
+        _ => panic!("Invalid event"),
     }
 }
 
@@ -252,134 +105,345 @@ Sec-WebSocket-Key: 123abc
 
 ";
 
-// const WS_UPGRADE_RESPONSE: &str = "HTTP/1.1";
+const WS_UPGRADE_RESPONSE: &str = "HTTP/1.1";
+
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    serial: String,
+    version: String,
+}
 
 pub struct Device {
     pub port: String,
-    runtime: Runtime,
-    message_channel: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
-    // serial_port: Option<tokio_serial::SerialStream>,
+    runtime: Option<Runtime>,
+    tx_pending_send: Option<mpsc::Sender<Vec<u8>>>,
+    pub tx_event: Option<broadcast::Sender<Event>>,
+    next_tx_id: u8,
+}
+
+fn construct_draw_buffer_payload(
+    screen: Screen,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    buffer: &[u8],
+) -> Result<Vec<u8>> {
+    if (width * height * 2) as usize != buffer.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Invalid buffer length",
+        ));
+    }
+
+    let mut buff = Vec::new();
+    buff.append(&mut Vec::from(screen));
+    buff.append(&mut x.to_be_bytes().to_vec());
+    buff.append(&mut y.to_be_bytes().to_vec());
+    buff.append(&mut width.to_be_bytes().to_vec());
+    buff.append(&mut height.to_be_bytes().to_vec());
+    buff.append(&mut buffer.to_vec());
+
+    return Ok(buff);
+}
+
+fn construct_message_payload(message_buffer: Vec<u8>, tx_id: u8) -> Vec<u8> {
+    let mut prefix_buff: Vec<u8>;
+
+    if message_buffer.len() > 0xff {
+        prefix_buff = Vec::with_capacity(14);
+
+        for i in 0..14 {
+            prefix_buff.push(0x00);
+        }
+
+        prefix_buff[0] = 0x82;
+        prefix_buff[1] = 0xFF;
+
+        let offset = 6;
+        // println!("Message length: {:?}", message_buffer.len());
+
+        (message_buffer.len() as u32)
+            .to_be_bytes()
+            .iter()
+            .enumerate()
+            .for_each(|(i, b)| {
+                prefix_buff[offset + i] = *b;
+            });
+
+        // prefix_buff[2 + offset] = (len >> 24) as u8;
+        // prefix_buff[3 + offset] = (len >> 16) as u8;
+        // prefix_buff[4 + offset] = (len >> 8) as u8;
+        // prefix_buff[5 + offset] = len as u8;
+    } else {
+        prefix_buff = Vec::with_capacity(6);
+
+        for i in 0..6 {
+            prefix_buff.push(0x00);
+        }
+
+        prefix_buff[0] = 0x82;
+        prefix_buff[1] = 0x80 + message_buffer.len() as u8;
+    }
+
+    let mut message = Vec::with_capacity(prefix_buff.len() + message_buffer.len());
+    message.extend_from_slice(&prefix_buff);
+    message.extend_from_slice(&message_buffer);
+
+    message[prefix_buff.len() + 2] = tx_id;
+
+    message
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<Vec<String>>()
+        .join(" ")
 }
 
 impl Device {
     pub fn new(port: String) -> Device {
         Device {
             port,
-            runtime: Runtime::new().unwrap(),
-            message_channel: None,
+            runtime: None,
+            tx_pending_send: None,
+            tx_event: None,
+            next_tx_id: 2,
         }
     }
 
-    pub fn connect(&mut self, on_event: Option<Box<dyn Fn(Event) + Send + Sync + 'static>>) {
+    pub async fn connect(&mut self) -> Result<()> {
         println!("Connecting to Loupedeck on port {}", self.port);
 
-        // self.serial_port = Some(serial_port);
-        self.poll(Mutex::new(on_event));
+        let mut port = tokio_serial::new("COM3".to_string(), 9600)
+            .open_native_async()
+            .expect("Failed to open port");
+
+        println!("Waiting for writable");
+        port.writable().await;
+
+        port.try_write(WS_UPGRADE_HEADER.as_bytes())
+            .expect("Failed to write to port");
+
+        println!("Waiting for readable");
+        port.readable().await;
+        let mut buf = vec![0; 1024];
+
+        port.try_read(buf.as_mut_slice())
+            .expect("Failed to read from port");
+
+        let res = String::from_utf8(buf).unwrap();
+
+        if !res.contains(WS_UPGRADE_RESPONSE) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to upgrade to websocket",
+            ));
+        }
+
+        self.start_polling(port);
+
+        return Ok(());
     }
 
     pub fn disconnect(&mut self) {
-        // self.runtime.shutdown_timeout(Duration::from_millis(100));
-        println!("Disconnecting from Loupedeck on port {}", self.port);
+        println!("Disconnecting from loupedeck on port {}", self.port);
+        self.tx_event = None;
+        self.tx_pending_send = None;
+
+        let runtime = self.runtime.take();
+
+        if let Some(runtime) = runtime {
+            runtime.shutdown_background();
+        }
     }
 
-    pub fn vibrate(&self) {
+    pub async fn vibrate(&mut self, level: Haptic) {
         let mut vib_header = Vec::new();
         vib_header.push(0x04);
         vib_header.push(0x1b);
 
         let mut data = Vec::new();
-        data.push(0x0A);
+        data.push(level as u8);
 
-        self.send_message(vib_header, data, false)
+        self.send_message(vib_header, data, false).await;
     }
 
-    pub fn send_message(&self, action: Vec<u8>, data: Vec<u8>, track: bool) {
+    pub async fn draw_key(&mut self, img: Vec<u8>) {
+        let x: u16 = 180;
+        let y: u16 = 0;
+        let width: u16 = 90;
+        let height: u16 = 90;
+
+        self.draw_buffer(Screen::Center, x, y, width, height, img.as_slice())
+            .await;
+    }
+
+    pub async fn draw_buffer(
+        &mut self,
+        screen: Screen,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        buffer: &[u8],
+    ) -> Result<()> {
+        let buff_res = construct_draw_buffer_payload(screen.clone(), x, y, width, height, buffer);
+
+        if buff_res.is_err() {
+            return Err(buff_res.unwrap_err());
+        }
+
+        self.send_message(
+            Vec::from(MessageHeader::WriteFrameBuffer),
+            buff_res.unwrap(),
+            true,
+        )
+        .await;
+
+        self.refresh_screen(screen).await;
+
+        Ok(())
+    }
+
+    async fn refresh_screen(&mut self, screen: Screen) {
+        self.send_message(Vec::from(MessageHeader::DrawOut), Vec::from(screen), true)
+            .await;
+    }
+
+    pub async fn get_info(&mut self) -> Result<DeviceInfo> {
+        let serial_evt = self
+            .send_message(Vec::from(MessageHeader::SerialOut), vec![], true)
+            .await;
+        let version_evt = self
+            .send_message(Vec::from(MessageHeader::VersionOut), vec![], true)
+            .await;
+
+        let mut version_number: Option<String> = None;
+        let mut serial: Option<String> = None;
+
+        if serial_evt.is_some() {
+            let serial_evt_result = serial_evt.unwrap();
+            if serial_evt_result.is_ok() {
+                let serial_evt_event = serial_evt_result.unwrap();
+                if let Event::SerialIn(SerialInEvent { serial_number, .. }) = serial_evt_event {
+                    serial = Some(serial_number);
+                }
+            }
+        }
+
+        if version_evt.is_some() {
+            let version_in_result = version_evt.unwrap();
+            if version_in_result.is_ok() {
+                let version_in_event = version_in_result.unwrap();
+                if let Event::VersionIn(VersionInEvent { version, .. }) = version_in_event {
+                    version_number = Some(version);
+                }
+            }
+        }
+
+        if version_number.is_none() || serial.is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to get device info",
+            ));
+        }
+
+        return Ok(DeviceInfo {
+            serial: serial.unwrap(),
+            version: version_number.unwrap(),
+        });
+    }
+
+    async fn send_message(
+        &mut self,
+        action: Vec<u8>,
+        data: Vec<u8>,
+        expect_event: bool,
+    ) -> Option<std::result::Result<Event, RecvError>> {
         let mut header: Vec<u8> = Vec::with_capacity(3);
         header.push(action[0]);
         header.push(action[1]);
-        header.push(3);
+        header.push(0x01);
 
         let mut message: Vec<u8> = Vec::with_capacity(header.len() + data.len());
         message.extend_from_slice(&header);
         message.extend_from_slice(&data);
 
-        self.send(message, false);
+        return self.send(message, expect_event).await;
     }
 
-    pub fn send(&self, message_buffer: Vec<u8>, raw: bool) {
-        if !raw {
-            let mut prefix_buff: Vec<u8>;
+    async fn send(
+        &mut self,
+        message_buffer: Vec<u8>,
+        expect_event: bool,
+    ) -> Option<std::result::Result<Event, RecvError>> {
+        let (response_tx, response_rx): (oneshot::Sender<Event>, oneshot::Receiver<Event>) =
+            oneshot::channel();
 
-            if message_buffer.len() > 0xff {
-                prefix_buff = Vec::with_capacity(14);
+        let mut tx_id: u8 = 0x01;
+        if expect_event {
+            tx_id = self.next_tx_id;
+            self.next_tx_id += 1;
+        }
 
-                for i in 0..14 {
-                    prefix_buff.push(0x00);
+        let runtime = self.runtime.as_ref().unwrap();
+        let tx_pending_send = self.tx_pending_send.as_ref().unwrap().clone();
+        let message = construct_message_payload(message_buffer, tx_id);
+
+        if self.tx_event.is_some() && expect_event {
+            let mut rx_event = self.tx_event.clone().unwrap().subscribe();
+
+            runtime.spawn(async move {
+                while let Ok(res) = rx_event.recv().await {
+                    let evt_tx_id = get_tx_id(res.clone());
+
+                    if evt_tx_id.is_some() && evt_tx_id.unwrap() == tx_id {
+                        response_tx.send(res).unwrap();
+                        break;
+                    }
                 }
+            });
+        }
 
-                prefix_buff[0] = 0x82;
-                prefix_buff[1] = 0xFF;
+        runtime.spawn(async move {
+            tx_pending_send.send(message).await;
+        });
 
-                let len = (message_buffer.len() as u32).to_be();
-                let offset = 7;
-                prefix_buff[2 + offset] = (len >> 24) as u8;
-                prefix_buff[3 + offset] = (len >> 16) as u8;
-                prefix_buff[4 + offset] = (len >> 8) as u8;
-                prefix_buff[5 + offset] = len as u8;
-            } else {
-                prefix_buff = Vec::with_capacity(6);
-
-                for i in 0..6 {
-                    prefix_buff.push(0x00);
-                }
-
-                prefix_buff[0] = 0x82;
-                prefix_buff[1] = 0x80 + message_buffer.len() as u8;
-            }
-
-            if self.message_channel.is_some() {
-                let tx = self.message_channel.as_ref().unwrap().clone();
-
-                let mut message = Vec::with_capacity(prefix_buff.len() + message_buffer.len());
-                message.extend_from_slice(&prefix_buff);
-                message.extend_from_slice(&message_buffer);
-
-                self.runtime.spawn(async move {
-                    tx.send(message).await.unwrap();
-                });
-            }
+        if expect_event {
+            return Some(response_rx.await);
+        } else {
+            return None;
         }
     }
 
-    fn poll(&mut self, on_event_mutex: Mutex<Option<Box<dyn Fn(Event) + Send + Sync + 'static>>>) {
-        let (tx, mut rx) = mpsc::channel(100);
-        self.message_channel = Some(tx);
+    fn start_polling(&mut self, mut serial: SerialStream) {
+        let (tx_event, mut rx_event) = broadcast::channel(1);
+        let (tx_pending_send, mut rx_pending_send) = mpsc::channel(100);
+        self.runtime = Some(Runtime::new().unwrap());
 
-        let cloned = self.port.clone();
+        self.tx_pending_send = Some(tx_pending_send.clone());
+        self.tx_event = Some(tx_event.clone());
 
-        self.runtime.spawn(async move {
-            let mut port = tokio_serial::new(cloned.as_str(), 9600)
-                .open_native_async()
-                .expect("Failed to open port");
+        let runtime = self.runtime.as_ref().unwrap();
 
-            println!("Connected to Loupedeck on port {}", cloned.as_str());
-
-            port.write(WS_UPGRADE_HEADER.as_bytes())
-                .expect("Failed to write to port");
-
+        runtime.spawn(async move {
             loop {
                 // Send any pending messages
 
                 // Try to write everything we can from the port
-                while let Ok(message) = rx.try_recv() {
-                    port.write(message.as_slice())
+                while let Ok(message) = rx_pending_send.try_recv() {
+                    // println!("sending pending message {:?}", to_hex(message.as_slice()));
+                    serial
+                        .write(message.as_slice())
                         .expect("Failed to write to port");
                 }
 
                 loop {
                     let mut single_byte: Vec<u8> = vec![0; 1];
-
-                    let res = port.read(single_byte.as_mut_slice());
+                    let res = serial.try_read(single_byte.as_mut_slice());
 
                     if res.is_err() {
                         break;
@@ -387,22 +451,21 @@ impl Device {
 
                     if single_byte[0] == 0x82 {
                         // Found delimiter
-                        port.read(single_byte.as_mut_slice())
+                        serial
+                            .try_read(single_byte.as_mut_slice())
                             .expect("Found no length data");
                         let length = single_byte[0] as usize;
                         // println!("Found message with length {}", length);
                         let mut data: Vec<u8> = vec![0; length];
-                        port.read(data.as_mut_slice()).expect("Found no data!");
+                        serial
+                            .try_read(data.as_mut_slice())
+                            .expect("Found no data!");
                         let event = parse_serial_message(&data);
 
-                        let on_event = on_event_mutex.lock().expect("Failed to lock on_event");
-
                         if event.is_ok() {
-                            let event = event.unwrap();
-                            if let Some(on_event) = on_event.as_ref() {
-                                if event.is_some() {
-                                    on_event(event.unwrap());
-                                }
+                            let evt_unrw = event.unwrap();
+                            if evt_unrw.is_some() {
+                                tx_event.send(evt_unrw.unwrap()).unwrap();
                             }
                         }
                     }
@@ -433,11 +496,31 @@ pub fn get_loupedeck_ports() -> Vec<String> {
     return ports;
 }
 
-pub fn connect_loupedeck_device<F>(port: String, on_event: F) -> Device
-where
-    F: Fn(Event) + Send + Sync + 'static,
-{
-    let mut loupedeck = Device::new(port);
-    loupedeck.connect(Some(Box::new(on_event)));
-    return loupedeck;
+#[cfg(test)]
+mod tests {
+    use super::construct_draw_buffer_payload;
+
+    #[test]
+    fn it_create_draw_buffer_red_key_payload() {
+        let mut half_red: Vec<u8> = Vec::with_capacity(90 * 90 * 2);
+        for i in 0..(90 * 90) {
+            half_red.push(0x00);
+            half_red.push(0xF8);
+        }
+
+        let mut payload = construct_draw_buffer_payload(
+            crate::Screen::Center,
+            180,
+            0,
+            90,
+            90,
+            half_red.as_slice(),
+        )
+        .expect("Failed to create payload");
+
+        let header = vec![0x00, 0x41, 0x00, 0xb4, 0x00, 0x00, 0x00, 0x5a, 0x00, 0x5a];
+
+        assert_eq!(header, payload.drain(0..header.len()).collect::<Vec<u8>>());
+        // assert_eq!(payload.len(), 16213);
+    }
 }
