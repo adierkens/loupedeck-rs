@@ -1,26 +1,29 @@
-use loupedeck::{PluginRegistrar, ScreenPlugin};
+use loupedeck::{PluginRegistrar, ScreenPlugin, ScreenPluginOptions};
 use std::io::Result;
 
-loupedeck::export_plugin!(register);
+loupedeck::export_plugin!("time-plugin", register);
 
 extern "C" fn register(registrar: &mut dyn PluginRegistrar) {
-    println!("register time-plugin");
-    registrar.register_screen("time-plugin", Box::new(ScreenPluginImpl));
+    registrar
+        .register_screen(
+            "current-time",
+            ScreenPluginOptions { exclusive: false },
+            create_plugin,
+        )
+        .expect("registered");
+}
+
+fn create_plugin(ctx: loupedeck::PluginScreenContext) -> Box<dyn ScreenPlugin> {
+    Box::new(ScreenPluginImpl { ctx })
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScreenPluginImpl;
+pub struct ScreenPluginImpl {
+    ctx: loupedeck::PluginScreenContext,
+}
 
 impl ScreenPlugin for ScreenPluginImpl {
-    fn create(&self, _position: loupedeck::loupedeck::Screen) -> Result<()> {
-        println!("ScreenPluginImpl::create");
-        Ok(())
-    }
-    fn destroy(&self, _position: loupedeck::loupedeck::Screen) -> Result<()> {
-        println!("ScreenPluginImpl::destroy");
-        Ok(())
-    }
-    fn on_touch(&self, _position: loupedeck::loupedeck::TouchEvent) -> Result<()> {
+    fn on_touch(&self, _position: loupedeck::TouchEvent) -> Result<()> {
         println!("ScreenPluginImpl::on_touch");
         Ok(())
     }

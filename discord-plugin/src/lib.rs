@@ -4,7 +4,6 @@ use std::io::Result;
 loupedeck::export_plugin!(register);
 
 extern "C" fn register(registrar: &mut dyn PluginRegistrar) {
-    println!("register time-plugin");
     registrar.register_screen("time-plugin", Box::new(ScreenPluginImpl));
 }
 

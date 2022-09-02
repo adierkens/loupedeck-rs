@@ -277,3 +277,5 @@ pub enum Event {
     ConfirmFrameBufferIn(ConfirmFrameBufferInEvent),
     DrawIn(DrawInEvent),
 }
+
+pub static KEY_SIZE: u16 = 90;

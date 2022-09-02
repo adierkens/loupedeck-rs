@@ -12,6 +12,8 @@ serde = { version = "1.0", features = ["derive"] }
 tokio-serial = "5.4.3"
 mio-serial = "5.0.2"
 tokio = { version = "1", features = ["full"] }
+libloading = "0.5.2"
+serde_with = "2.0.0"
 
 # test stuff
 raqote = { version = "0.8.1", features = ["text"] }

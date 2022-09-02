@@ -1,14 +1,11 @@
-use mio_serial::SerialPort;
+use raqote::DrawTarget;
 use std::io::prelude::*;
 use std::io::Result;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::join;
 use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::oneshot::Sender;
 use tokio::time;
 use tokio_serial::SerialPortBuilderExt;
 use tokio_serial::SerialStream;
@@ -115,7 +112,7 @@ pub struct DeviceInfo {
 
 pub struct Device {
     pub port: String,
-    runtime: Option<Runtime>,
+    pub(crate) runtime: Option<Runtime>,
     tx_pending_send: Option<mpsc::Sender<Vec<u8>>>,
     pub tx_event: Option<broadcast::Sender<Event>>,
     next_tx_id: u8,
@@ -215,9 +212,13 @@ impl Device {
     }
 
     pub async fn connect(&mut self) -> Result<()> {
+        if self.runtime.is_some() {
+            return Ok(());
+        }
+
         println!("Connecting to Loupedeck on port {}", self.port);
 
-        let mut port = tokio_serial::new("COM3".to_string(), 9600)
+        let mut port = tokio_serial::new(self.port.clone(), 9600)
             .open_native_async()
             .expect("Failed to open port");
 
@@ -271,9 +272,9 @@ impl Device {
         self.send_message(vib_header, data, false).await;
     }
 
-    pub async fn draw_key(&mut self, img: Vec<u8>) {
-        let x: u16 = 180;
-        let y: u16 = 0;
+    pub async fn draw_key(&mut self, key_x: u16, key_y: u16, img: Vec<u8>) {
+        let x: u16 = KEY_SIZE * key_x;
+        let y: u16 = KEY_SIZE * key_y;
         let width: u16 = 90;
         let height: u16 = 90;
 
@@ -522,5 +523,101 @@ mod tests {
 
         assert_eq!(header, payload.drain(0..header.len()).collect::<Vec<u8>>());
         // assert_eq!(payload.len(), 16213);
+    }
+}
+
+pub fn convert_draw_target_to_rgb565(dt: DrawTarget) -> Vec<u8> {
+    let mut result: Vec<u8> = Vec::new();
+    let bg_color: u32 = 0x000000;
+
+    // orig is AARRGGBB
+
+    let draw_data = dt.get_data();
+    for px in draw_data {
+        let rgb16 = convert_argb888_to_rgb565(*px);
+        result.append(&mut rgb16.to_le_bytes().to_vec());
+    }
+
+    result
+}
+
+fn convert_argb888_to_rgb565(argb: u32) -> u16 {
+    let r = ((argb >> 16) & 0xff) as u16;
+    let g = ((argb >> 8) & 0xff) as u16;
+    let b = (argb & 0xff) as u16;
+    ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+}
+
+#[cfg(test)]
+mod draw_tests {
+    use raqote::{DrawOptions, DrawTarget, SolidSource, Source};
+
+    use crate::convert_draw_target_to_rgb565;
+
+    use super::convert_argb888_to_rgb565;
+
+    #[test]
+    fn it_converts() {
+        assert_eq!(convert_argb888_to_rgb565(0xFF000000), 0);
+        assert_eq!(convert_argb888_to_rgb565(0xFFFFFFFF), 0xffff);
+        assert_eq!(convert_argb888_to_rgb565(0xFF0000FF), 0x001f);
+        assert_eq!(convert_argb888_to_rgb565(0xFFFF0000), 0xf800);
+        assert_eq!(convert_argb888_to_rgb565(0xFF00FF00), 0x07e0);
+    }
+
+    #[test]
+    fn it_works_for_dt_red() {
+        let mut dt = DrawTarget::new(1, 1);
+
+        let mut solidRed: SolidSource =
+            SolidSource::from_unpremultiplied_argb(255, 0xFF, 0x00, 0x00);
+
+        dt.fill_rect(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            &Source::Solid(solidRed),
+            &DrawOptions::new(),
+        );
+
+        assert_eq!(convert_draw_target_to_rgb565(dt), vec![0x00, 0xF8,]);
+    }
+    #[test]
+    fn it_works_for_dt_green() {
+        let mut dt = DrawTarget::new(1, 1);
+
+        let mut solidGreen: SolidSource =
+            SolidSource::from_unpremultiplied_argb(255, 0x00, 0xFF, 0x00);
+
+        dt.fill_rect(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            &Source::Solid(solidGreen),
+            &DrawOptions::new(),
+        );
+
+        assert_eq!(convert_draw_target_to_rgb565(dt), vec![0xE0, 0x07,]);
+    }
+
+    #[test]
+    fn it_works_for_dt_blue() {
+        let mut dt = DrawTarget::new(1, 1);
+
+        let mut solidBlue: SolidSource =
+            SolidSource::from_unpremultiplied_argb(255, 0x00, 0x00, 0xFF);
+
+        dt.fill_rect(
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            &Source::Solid(solidBlue),
+            &DrawOptions::new(),
+        );
+
+        assert_eq!(convert_draw_target_to_rgb565(dt), vec![0x1F, 0x00]);
     }
 }

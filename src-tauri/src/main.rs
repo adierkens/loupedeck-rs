@@ -7,10 +7,7 @@
 static ALLOCATOR: System = System;
 
 use libloading::Library;
-use loupedeck::{
-    connect_loupedeck_device, get_loupedeck_ports, ButtonPlugin, KnobPlugin, PluginDeclaration,
-    ScreenPlugin,
-};
+use loupedeck::{get_loupedeck_ports, PluginDeclaration, ScreenPluginFactory, ScreenPluginOptions};
 use platform_dirs::AppDirs;
 use serde::Serialize;
 use std::fs::{self};
@@ -20,78 +17,14 @@ use std::{alloc::System, collections::HashMap, env, ffi::OsStr, io, sync::Mutex}
 use tauri::utils::assets::EmbeddedAssets;
 use tauri::{CustomMenuItem, Manager, State, SystemTray, SystemTrayMenu, SystemTrayMenuItem};
 
-pub struct ScreenPluginProxy {
-    plugin: Box<dyn ScreenPlugin>,
-    _lib: Arc<Library>,
-}
-
-pub struct ButtonPluginProxy {
-    plugin: Box<dyn ButtonPlugin>,
-    _lib: Arc<Library>,
-}
-
-unsafe impl Send for ScreenPluginProxy {}
-unsafe impl Sync for ScreenPluginProxy {}
-
-pub struct KnobPluginProxy {
-    plugin: Box<dyn KnobPlugin>,
-    _lib: Arc<Library>,
-}
-
-impl KnobPlugin for KnobPluginProxy {
-    fn create(&self, position: loupedeck::Knob) -> Result<()> {
-        self.plugin.create(position)
-    }
-
-    fn destroy(&self, position: loupedeck::Knob) -> Result<()> {
-        self.plugin.destroy(position)
-    }
-
-    fn on_change(&self, position: loupedeck::KnobRotateEvent) -> Result<&str> {
-        self.plugin.on_change(position)
-    }
-}
-
-impl ButtonPlugin for ButtonPluginProxy {
-    fn create(&self, position: loupedeck::Button) -> Result<()> {
-        self.plugin.create(position)
-    }
-
-    fn destroy(&self, position: loupedeck::Button) -> Result<()> {
-        self.plugin.destroy(position)
-    }
-
-    fn on_change(&self, position: loupedeck::ButtonPressEvent) -> Result<()> {
-        self.plugin.on_change(position)
-    }
-}
-
-impl ScreenPlugin for ScreenPluginProxy {
-    fn create(&self, position: loupedeck::Screen) -> Result<()> {
-        self.plugin.create(position)
-    }
-
-    fn destroy(&self, position: loupedeck::Screen) -> Result<()> {
-        self.plugin.destroy(position)
-    }
-
-    fn on_touch(&self, position: loupedeck::TouchEvent) -> Result<()> {
-        self.plugin.on_touch(position)
-    }
-}
-
 struct PluginRegistrar {
-    knobs: HashMap<String, KnobPluginProxy>,
-    buttons: HashMap<String, ButtonPluginProxy>,
-    screens: HashMap<String, ScreenPluginProxy>,
+    screens: HashMap<String, ScreenPluginFactory>,
     lib: Arc<Library>,
 }
 
 impl PluginRegistrar {
     pub fn new(lib: Arc<Library>) -> PluginRegistrar {
         PluginRegistrar {
-            knobs: HashMap::default(),
-            buttons: HashMap::default(),
             screens: HashMap::default(),
             lib,
         }
@@ -99,25 +32,12 @@ impl PluginRegistrar {
 }
 
 impl loupedeck::PluginRegistrar for PluginRegistrar {
-    fn register_knob(&mut self, name: &str, plugin: Box<dyn KnobPlugin>) {
-        let proxy = KnobPluginProxy {
-            plugin: plugin,
-            _lib: Arc::clone(&self.lib),
-        };
-
-        self.knobs.insert(name.to_string(), proxy);
-    }
-
-    fn register_button(&mut self, name: &str, plugin: Box<dyn ButtonPlugin>) {
-        let proxy = ButtonPluginProxy {
-            plugin: plugin,
-            _lib: Arc::clone(&self.lib),
-        };
-
-        self.buttons.insert(name.to_string(), proxy);
-    }
-
-    fn register_screen(&mut self, name: &str, plugin: Box<dyn ScreenPlugin>) {
+    fn register_screen(
+        &mut self,
+        name: &str,
+        options: ScreenPluginOptions,
+        create: ScreenPluginFactory,
+    ) {
         let proxy = ScreenPluginProxy {
             plugin: plugin,
             _lib: Arc::clone(&self.lib),
@@ -129,9 +49,7 @@ impl loupedeck::PluginRegistrar for PluginRegistrar {
 
 #[derive(Default)]
 pub struct ExternalPlugins {
-    knobs: HashMap<String, KnobPluginProxy>,
-    buttons: HashMap<String, ButtonPluginProxy>,
-    screens: HashMap<String, ScreenPluginProxy>,
+    screens: HashMap<String, ScreenPluginFactory>,
     libraries: Vec<Arc<Library>>,
 }
 
@@ -326,114 +244,10 @@ fn build_window(context: &tauri::Context<EmbeddedAssets>) -> tauri::Builder<taur
         ]);
 }
 
-mod plugins {
-    use loupedeck::ScreenPlugin;
-    use tauri::{
-        plugin::{Builder as PluginBuilder, TauriPlugin},
-        Manager, RunEvent, Runtime,
-    };
-
-    pub fn init<R: Runtime>() -> TauriPlugin<R> {
-        PluginBuilder::new("window")
-            .setup(|app| {
-                let plugins = crate::load_plugins();
-
-                app.listen_global("trigger-screen-plugin", move |evt| {
-                    println!("{:?}", evt);
-                    let name = evt.payload();
-                    if name.is_some() {
-                        let plugin_name = name.unwrap();
-                        println!("plugin_name {:?}", name);
-                        println!("plugins {:?}", plugins.screens.keys());
-
-                        let plugin = plugins.screens.get(plugin_name);
-                        if plugin.is_some() {
-                            let plugin = plugin.unwrap();
-                            plugin.create(loupedeck::Screen::Center);
-                        }
-                    }
-                });
-
-                // initialize the plugin here
-                Ok(())
-            })
-            .invoke_handler(tauri::generate_handler![])
-            .build()
-    }
-}
-
 fn main() {
     let context = tauri::generate_context!();
 
-    let app_builder = build_window(&context).plugin(plugins::init());
+    let app_builder = build_window(&context);
 
     app_builder.run(context);
-}
-
-mod ld_controller {
-    use std::{collections::HashMap, hash::Hash};
-
-    use loupedeck::ButtonPlugin;
-
-    use crate::PluginRegistrar;
-
-    struct PageConfig {
-        id: u16,
-        name: String,
-        buttons: HashMap<loupedeck::Button, String>,
-        knobs: HashMap<loupedeck::Knob, String>,
-        screens: HashMap<loupedeck::Screen, String>,
-    }
-
-    struct Page {
-        config: PageConfig,
-        name: String,
-        id: u16,
-        buttons: HashMap<loupedeck::Button, String>,
-        knobs: HashMap<loupedeck::Knob, String>,
-        screens: HashMap<loupedeck::Screen, String>,
-    }
-
-    impl Page {
-        fn new(config: PageConfig, registrar: PluginRegistrar) -> Page {
-            let buttons = HashMap::new();
-            let knobs = HashMap::new();
-            let screens = HashMap::new();
-
-            for (button, plugin_name) in config.buttons.iter() {
-                let plugin = registrar.buttons.get(plugin_name);
-                if plugin.is_some() {
-                    let plugin = plugin.unwrap();
-                    plugin.create(*button);
-                    buttons.insert(*button, plugin);
-                }
-            }
-
-            return Page {
-                name: config.name.clone(),
-                id: config.id.clone(),
-                buttons,
-                knobs,
-                screens,
-                config,
-            };
-        }
-    }
-
-    struct LDController {
-        ld: loupedeck::Device,
-        plugin_registrar: PluginRegistrar,
-        pages: HashMap<u16, Page>,
-    }
-
-    impl LDController {
-        fn new(ld: loupedeck::Device, plugin_registrar: PluginRegistrar) -> LDController {
-            let pages = HashMap::new();
-            return LDController {
-                ld,
-                plugin_registrar,
-                pages,
-            };
-        }
-    }
 }
