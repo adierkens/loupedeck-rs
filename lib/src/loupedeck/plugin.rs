@@ -2,6 +2,8 @@ use std::io::Result;
 
 use raqote::DrawTarget;
 
+use crate::Screen;
+
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_id:literal, $register:expr) => {
@@ -28,15 +30,33 @@ pub enum PluginType {
     Knob,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PluginScreenContext {}
+#[derive(Debug, Clone)]
+pub struct PluginScreenContext {
+    device_event_emitter: crate::ExternalDeviceEventEmitter,
+    position: Screen,
+    index: u8,
+}
 
 impl PluginScreenContext {
-    pub(crate) fn new() -> Self {
-        Self {}
+    pub(crate) fn new(
+        device_event_emitter: crate::ExternalDeviceEventEmitter,
+        position: Screen,
+        index: u8,
+    ) -> Self {
+        Self {
+            position,
+            index,
+            device_event_emitter,
+        }
     }
 
     pub fn draw_target(&self, target: DrawTarget) -> Result<()> {
+        Ok(())
+    }
+
+    pub async fn vibrate(&self, level: crate::Haptic) -> Result<()> {
+        println!("Sending vibration: {:?}", level);
+        self.device_event_emitter.vibrate(level).await;
         Ok(())
     }
 }

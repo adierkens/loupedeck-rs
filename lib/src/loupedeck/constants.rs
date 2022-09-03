@@ -98,7 +98,7 @@ impl Button {
     }
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[repr(u16)]
 pub enum Screen {
     Left,

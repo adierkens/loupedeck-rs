@@ -12,3 +12,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 loupedeck = { path = "../lib" }
+tokio = { version = "1", features = ["full"] }

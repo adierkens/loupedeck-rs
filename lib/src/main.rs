@@ -3,8 +3,8 @@ use font_kit::properties::Properties;
 use font_kit::source::SystemSource;
 use loupedeck::*;
 use raqote::{DrawOptions, DrawTarget, Point, SolidSource, Source};
-use std::{alloc::System, collections::HashMap};
-use tokio::time::{self, Duration, Instant};
+use std::collections::HashMap;
+use tokio::time::{sleep, Duration};
 
 fn create_key() -> Vec<u8> {
     let mut dt = DrawTarget::new(90, 90);
@@ -105,9 +105,26 @@ async fn main() {
         },
     );
 
+    let mut screen_map_2: HashMap<u8, PluginIdentifier> = HashMap::default();
+
+    controller.start(ld);
+
+    screen_map_2.insert(
+        0,
+        PluginIdentifier {
+            plugin_id: "time-plugin".to_string(),
+            plugin_ref: "current-date".to_string(),
+        },
+    );
+
     let mut page_config = PageConfig {
         name: "basic".to_string(),
         screen: screen_map,
+    };
+
+    let mut page_config_2 = PageConfig {
+        name: "basic-2".to_string(),
+        screen: screen_map_2,
     };
 
     controller
@@ -115,7 +132,21 @@ async fn main() {
         .expect("Failed to add page");
 
     controller
-        .set_current_page(ld, "basic".to_string())
+        .set_page(page_config_2)
+        .expect("Failed to add page");
+
+    controller
+        .set_current_page("basic-2".to_string())
+        .await
+        .expect("Failed to set page");
+
+    println!("Sleeping");
+    sleep(Duration::from_secs(10)).await;
+    println!("Setting page 2");
+
+    controller
+        .set_current_page("basic".to_string())
+        .await
         .expect("Failed to set page");
 
     loop {}

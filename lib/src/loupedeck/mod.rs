@@ -200,6 +200,61 @@ fn to_hex(bytes: &[u8]) -> String {
         .join(" ")
 }
 
+#[derive(Debug, Clone)]
+pub struct ExternalDeviceEventEmitter {
+    tx_event: mpsc::Sender<ExternalMessage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalMessage {
+    action: Vec<u8>,
+    data: Vec<u8>,
+}
+
+impl From<ExternalMessage> for Vec<u8> {
+    fn from(external_message: ExternalMessage) -> Vec<u8> {
+        let mut header: Vec<u8> = Vec::with_capacity(3);
+        header.push(external_message.action[0]);
+        header.push(external_message.action[1]);
+        header.push(0x01);
+
+        let mut message: Vec<u8> = Vec::with_capacity(header.len() + external_message.data.len());
+        message.extend_from_slice(&header);
+        message.extend_from_slice(&external_message.data);
+
+        return construct_message_payload(message, 1);
+    }
+}
+
+impl ExternalDeviceEventEmitter {
+    fn new(tx_event: mpsc::Sender<ExternalMessage>) -> Self {
+        Self { tx_event }
+    }
+
+    async fn send_message(&self, message: ExternalMessage) -> Result<()> {
+        println!("Sending message: {:?}", message);
+        self.tx_event.send(message).await;
+        Ok(())
+    }
+
+    pub async fn vibrate(&self, level: Haptic) -> Result<()> {
+        let mut vib_header = Vec::new();
+        vib_header.push(0x04);
+        vib_header.push(0x1b);
+
+        let mut data = Vec::new();
+        data.push(level as u8);
+
+        self.send_message(ExternalMessage {
+            action: vib_header,
+            data,
+        })
+        .await;
+
+        Ok(())
+    }
+}
+
 impl Device {
     pub fn new(port: String) -> Device {
         Device {
@@ -209,6 +264,29 @@ impl Device {
             tx_event: None,
             next_tx_id: 2,
         }
+    }
+
+    pub fn create_external_event_emitter(&self) -> ExternalDeviceEventEmitter {
+        let runtime = self.runtime.as_ref().unwrap();
+        let (tx_ext_message, mut rx_ext_message): (
+            mpsc::Sender<ExternalMessage>,
+            mpsc::Receiver<ExternalMessage>,
+        ) = mpsc::channel(10);
+
+        let tx_pending_send = self.tx_pending_send.as_ref().unwrap().clone();
+
+        runtime.spawn(async move {
+            loop {
+                // Try to write everything we can from the port
+                while let Ok(ext_message) = rx_ext_message.try_recv() {
+                    let message = Vec::from(ext_message);
+                    println!("Sending external message: {:?}", to_hex(&message));
+                    tx_pending_send.send(message).await.unwrap();
+                }
+            }
+        });
+
+        ExternalDeviceEventEmitter::new(tx_ext_message)
     }
 
     pub async fn connect(&mut self) -> Result<()> {
@@ -421,7 +499,7 @@ impl Device {
     }
 
     fn start_polling(&mut self, mut serial: SerialStream) {
-        let (tx_event, mut rx_event) = broadcast::channel(1);
+        let (tx_event, mut rx_event) = broadcast::channel(10);
         let (tx_pending_send, mut rx_pending_send) = mpsc::channel(100);
         self.runtime = Some(Runtime::new().unwrap());
 
@@ -436,7 +514,10 @@ impl Device {
 
                 // Try to write everything we can from the port
                 while let Ok(message) = rx_pending_send.try_recv() {
-                    // println!("sending pending message {:?}", to_hex(message.as_slice()));
+                    println!(
+                        "[LOOP] sending pending message {:?}",
+                        to_hex(message.as_slice())
+                    );
                     serial
                         .write(message.as_slice())
                         .expect("Failed to write to port");

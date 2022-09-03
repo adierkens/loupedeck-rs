@@ -1694,6 +1694,7 @@ name = "loupedeck_plugin_time"
 version = "0.0.0"
 dependencies = [
  "loupedeck",
+ "tokio",
 ]
 
 [[package]]

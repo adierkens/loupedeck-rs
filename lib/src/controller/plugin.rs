@@ -77,10 +77,16 @@ impl PluginRegistry {
         let mut registrar = TempPluginRegistrar::new(Arc::clone(&library));
         (decl.register)(&mut registrar);
 
-        self.plugins.insert(
-            decl.plugin_id.to_string(),
-            registrar.to_local_plugin(decl.plugin_id.to_string()),
+        let local_plugin = registrar.to_local_plugin(decl.plugin_id.to_string());
+
+        println!(
+            "Loaded plugin_id: {:?} with handlers: {:?}",
+            local_plugin.plugin_id,
+            local_plugin.screens.keys()
         );
+
+        self.plugins
+            .insert(decl.plugin_id.to_string(), local_plugin);
 
         Ok(())
     }
