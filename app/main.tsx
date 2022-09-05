@@ -12,6 +12,7 @@ import "rsuite/dist/rsuite.min.css";
 import { CustomProvider, Container, Content } from "rsuite";
 import { Plugins } from "./pages/Plugins";
 import { EventViewer } from "./pages/EventViewer";
+import { Editor } from "./pages/Editor";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                   <Route path="/device-config" element={<DeviceConfig />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/plugins" element={<Plugins />} />
+                  <Route path="/editor" element={<Editor />} />
                   <Route path="/event-viewer" element={<EventViewer />} />
                 </Routes>
               </Content>

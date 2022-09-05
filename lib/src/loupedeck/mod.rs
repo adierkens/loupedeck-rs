@@ -1,4 +1,6 @@
+use mio_serial::SerialPort;
 use raqote::DrawTarget;
+use std::collections::HashSet;
 use std::io::prelude::*;
 use std::io::Result;
 use tokio::runtime::Runtime;
@@ -144,6 +146,38 @@ fn construct_draw_buffer_payload(
     return Ok(buff);
 }
 
+//
+// 82 ff 00 00 00 00 00 00 3f 55 00 00 00 00 ff 10 02 00 41 00 00 00 00 00 5a 00 5a
+
+fn is_redraw_event(msg: &[u8]) -> Option<Screen> {
+    let mut screen_id: Option<u8> = None;
+
+    if msg.len() > 18 && msg[1] == 0xff && msg[14] == 0xff && msg[15] == 0x10 {
+        screen_id = Some(msg[18]);
+    } else if msg.len() > 10 && msg[6] == 0xff && msg[7] == 0x10 {
+        screen_id = Some(msg[10]);
+    }
+
+    if screen_id.is_none() {
+        return None;
+    }
+
+    return Some(Screen::from(screen_id.unwrap()));
+}
+
+fn construct_basic_message(action: Vec<u8>, data: Vec<u8>) -> Result<Vec<u8>> {
+    let mut header: Vec<u8> = Vec::with_capacity(3);
+    header.push(action[0]);
+    header.push(action[1]);
+    header.push(0x01);
+
+    let mut message: Vec<u8> = Vec::with_capacity(header.len() + data.len());
+    message.extend_from_slice(&header);
+    message.extend_from_slice(&data);
+
+    return Ok(message);
+}
+
 fn construct_message_payload(message_buffer: Vec<u8>, tx_id: u8) -> Vec<u8> {
     let mut prefix_buff: Vec<u8>;
 
@@ -201,11 +235,6 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 #[derive(Debug, Clone)]
-pub struct ExternalDeviceEventEmitter {
-    tx_event: mpsc::Sender<ExternalMessage>,
-}
-
-#[derive(Debug, Clone)]
 pub struct ExternalMessage {
     action: Vec<u8>,
     data: Vec<u8>,
@@ -226,15 +255,55 @@ impl From<ExternalMessage> for Vec<u8> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ExternalDeviceEventEmitter {
+    tx_event: mpsc::Sender<ExternalMessage>,
+}
+
 impl ExternalDeviceEventEmitter {
     fn new(tx_event: mpsc::Sender<ExternalMessage>) -> Self {
         Self { tx_event }
     }
 
     async fn send_message(&self, message: ExternalMessage) -> Result<()> {
-        println!("Sending message: {:?}", message);
+        // println!("Sending message: {:?}", message);
         self.tx_event.send(message).await;
         Ok(())
+    }
+
+    pub async fn draw_rgb565(
+        &self,
+        screen: Screen,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let buff_res =
+            construct_draw_buffer_payload(screen.clone(), x, y, width, height, data.as_slice());
+
+        self.send_message(ExternalMessage {
+            action: Vec::from(MessageHeader::WriteFrameBuffer),
+            data: buff_res.unwrap(),
+        })
+        .await;
+
+        Ok(())
+    }
+
+    pub async fn draw_target(
+        &self,
+        screen: Screen,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        target: DrawTarget,
+    ) -> Result<()> {
+        let draw_vec = convert_draw_target_to_rgb565(target);
+        self.draw_rgb565(screen, x, y, width, height, draw_vec)
+            .await
     }
 
     pub async fn vibrate(&self, level: Haptic) -> Result<()> {
@@ -266,8 +335,15 @@ impl Device {
         }
     }
 
-    pub fn create_external_event_emitter(&self) -> ExternalDeviceEventEmitter {
-        let runtime = self.runtime.as_ref().unwrap();
+    pub fn create_external_event_emitter(&self) -> Option<ExternalDeviceEventEmitter> {
+        let runtime_ref = self.runtime.as_ref();
+
+        if runtime_ref.is_none() {
+            return None;
+        }
+
+        let runtime = runtime_ref.unwrap();
+
         let (tx_ext_message, mut rx_ext_message): (
             mpsc::Sender<ExternalMessage>,
             mpsc::Receiver<ExternalMessage>,
@@ -280,13 +356,13 @@ impl Device {
                 // Try to write everything we can from the port
                 while let Ok(ext_message) = rx_ext_message.try_recv() {
                     let message = Vec::from(ext_message);
-                    println!("Sending external message: {:?}", to_hex(&message));
+                    // println!("Sending external message: {:?}", to_hex(&message));
                     tx_pending_send.send(message).await.unwrap();
                 }
             }
         });
 
-        ExternalDeviceEventEmitter::new(tx_ext_message)
+        Some(ExternalDeviceEventEmitter::new(tx_ext_message))
     }
 
     pub async fn connect(&mut self) -> Result<()> {
@@ -382,14 +458,7 @@ impl Device {
         )
         .await;
 
-        self.refresh_screen(screen).await;
-
         Ok(())
-    }
-
-    async fn refresh_screen(&mut self, screen: Screen) {
-        self.send_message(Vec::from(MessageHeader::DrawOut), Vec::from(screen), true)
-            .await;
     }
 
     pub async fn get_info(&mut self) -> Result<DeviceInfo> {
@@ -442,16 +511,8 @@ impl Device {
         data: Vec<u8>,
         expect_event: bool,
     ) -> Option<std::result::Result<Event, RecvError>> {
-        let mut header: Vec<u8> = Vec::with_capacity(3);
-        header.push(action[0]);
-        header.push(action[1]);
-        header.push(0x01);
-
-        let mut message: Vec<u8> = Vec::with_capacity(header.len() + data.len());
-        message.extend_from_slice(&header);
-        message.extend_from_slice(&data);
-
-        return self.send(message, expect_event).await;
+        let message = construct_basic_message(action, data);
+        return self.send(message.unwrap(), expect_event).await;
     }
 
     async fn send(
@@ -506,21 +567,51 @@ impl Device {
         self.tx_pending_send = Some(tx_pending_send.clone());
         self.tx_event = Some(tx_event.clone());
 
+        println!("Starting polling on port {}", self.port);
+
         let runtime = self.runtime.as_ref().unwrap();
 
         runtime.spawn(async move {
             loop {
                 // Send any pending messages
 
+                let mut redrawn_screens = HashSet::new();
+
                 // Try to write everything we can from the port
                 while let Ok(message) = rx_pending_send.try_recv() {
-                    println!(
-                        "[LOOP] sending pending message {:?}",
-                        to_hex(message.as_slice())
-                    );
-                    serial
-                        .write(message.as_slice())
-                        .expect("Failed to write to port");
+                    time::sleep(time::Duration::from_millis(2)).await;
+
+                    loop {
+                        let write_res = serial.write_all(&message);
+
+                        match write_res {
+                            Ok(_) => {
+                                if let Some(redraw) = is_redraw_event(message.as_slice()) {
+                                    redrawn_screens.insert(redraw);
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                println!("Error writing to serial: {:?}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !redrawn_screens.is_empty() {
+                    // Redraw any screens that have been updated
+                    for screen in redrawn_screens {
+                        let redraw_payload = construct_basic_message(
+                            Vec::from(MessageHeader::DrawOut),
+                            Vec::from(screen),
+                        )
+                        .unwrap();
+
+                        let redraw_message = construct_message_payload(redraw_payload, 1);
+
+                        tx_pending_send.send(redraw_message).await;
+                    }
                 }
 
                 loop {
@@ -547,13 +638,13 @@ impl Device {
                         if event.is_ok() {
                             let evt_unrw = event.unwrap();
                             if evt_unrw.is_some() {
-                                tx_event.send(evt_unrw.unwrap()).unwrap();
+                                tx_event.send(evt_unrw.unwrap());
                             }
                         }
                     }
                 }
 
-                time::sleep(time::Duration::from_millis(1)).await
+                time::sleep(time::Duration::from_millis(5)).await
             }
         });
     }
@@ -609,9 +700,6 @@ mod tests {
 
 pub fn convert_draw_target_to_rgb565(dt: DrawTarget) -> Vec<u8> {
     let mut result: Vec<u8> = Vec::new();
-    let bg_color: u32 = 0x000000;
-
-    // orig is AARRGGBB
 
     let draw_data = dt.get_data();
     for px in draw_data {

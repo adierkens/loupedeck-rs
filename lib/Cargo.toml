@@ -7,6 +7,9 @@ license = "MIT"
 description = "Loupedeck serial drivers in rust"
 repository = "https://github.com/adierkens/loupedeck-rs/"
 
+[profile.release]
+debug = 1
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 tokio-serial = "5.4.3"

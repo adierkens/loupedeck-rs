@@ -17,6 +17,11 @@ const HeaderItems = [
     to: "/event-viewer",
   },
   {
+    icon: <Gear />,
+    label: "Editor",
+    to: "/editor",
+  },
+  {
     icon: <Plus />,
     label: "Plugins",
     to: "/plugins",

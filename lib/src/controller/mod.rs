@@ -1,6 +1,6 @@
 use crate::{
-    Button, ButtonPressEvent, Device, Event, ExternalDeviceEventEmitter, Haptic, PluginRegistrar,
-    PluginScreenContext, PressDirection, ScreenPlugin,
+    Button, ButtonPressEvent, Device, Event, ExternalDeviceEventEmitter, Haptic, KeyLocation,
+    PluginRegistrar, PluginScreenContext, PressDirection, ScreenPlugin,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::Result;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use tokio::time;
 
 mod plugin;
 use plugin::*;
@@ -16,7 +17,7 @@ pub use plugin::PluginIdentifier;
 
 struct Page {
     name: String,
-    screen: HashMap<u8, ScreenPluginProxy>,
+    screen: HashMap<KeyLocation, ScreenPluginProxy>,
 }
 
 impl From<PageConfig> for Page {
@@ -40,7 +41,7 @@ unsafe impl Sync for ScreenPluginProxy {}
 pub struct PageConfig {
     pub name: String,
     #[serde_as(as = "Vec<(_, _)>")]
-    pub screen: HashMap<u8, PluginIdentifier>,
+    pub screen: HashMap<KeyLocation, PluginIdentifier>,
 }
 
 pub struct ControllerState {
@@ -51,6 +52,13 @@ pub struct ControllerState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControllerConfig {
     pub pages: HashMap<String, PageConfig>,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub enum DeviceConnectionStatus {
+    Connecting,
+    Connected,
+    Disconnected,
 }
 
 pub struct Controller {
@@ -78,6 +86,14 @@ impl Controller {
         unsafe { self.plugin_registry.load_from_path(plugin_path.to_string()) }
     }
 
+    pub fn get_connection_status(&self) -> Result<DeviceConnectionStatus> {
+        if self.runtime.is_none() {
+            return Ok(DeviceConnectionStatus::Disconnected);
+        }
+
+        return Ok(DeviceConnectionStatus::Connected);
+    }
+
     pub async fn set_current_page(&mut self, page_name: String) -> Result<()> {
         let page_config = self.config.pages.get(&page_name);
         if page_config.is_none() {
@@ -93,6 +109,7 @@ impl Controller {
             state.notify.send(current_page).await;
         }
 
+        println!("Set page to {}", page_name);
         return Ok(());
     }
 
@@ -118,8 +135,16 @@ impl Controller {
 
             if self.event_emitter.is_some() {
                 let event_emitter_copy = self.event_emitter.clone().unwrap();
-                let plugin_context =
-                    PluginScreenContext::new(event_emitter_copy, crate::Screen::Center, *key);
+                let plugin_context = PluginScreenContext::new(
+                    event_emitter_copy,
+                    crate::Screen::Center,
+                    (*key).clone(),
+                );
+
+                println!(
+                    "Creating screen plugin instance for {:?} at {:?}",
+                    plugin_identifier.plugin_ref, *key
+                );
 
                 let screen_instance = screen(plugin_context);
 
@@ -145,9 +170,9 @@ impl Controller {
         self.runtime = Some(Runtime::new().unwrap());
         let runtime = self.runtime.as_ref().unwrap();
 
-        self.event_emitter = Some(device.create_external_event_emitter());
+        let (tx_pending_send, mut rx_pending_send) = mpsc::channel(10);
 
-        let (tx_pending_send, mut rx_pending_send) = mpsc::channel(100);
+        self.event_emitter = device.create_external_event_emitter();
 
         let current_state = ControllerState {
             current_page: None,
@@ -174,14 +199,28 @@ impl Controller {
 
                         Event::TouchEvent(touch_event) => {
                             if current_page.is_some() {
+                                let key_location =
+                                    KeyLocation::from_location(touch_event.x, touch_event.y);
+
+                                println!(
+                                    "Touch event: {:?} ({}, {})",
+                                    key_location, touch_event.x, touch_event.y
+                                );
+
                                 let page = current_page.as_ref().unwrap();
-                                page.screen.iter().for_each(|(key, screen)| {
-                                    screen.plugin.on_touch(touch_event.clone());
-                                });
+
+                                let screen = page.screen.get(&key_location);
+
+                                if screen.is_some() {
+                                    let screen = screen.unwrap();
+                                    screen.plugin.on_touch(touch_event);
+                                }
                             }
                         }
                         _ => {}
                     }
+
+                    time::sleep(time::Duration::from_millis(1)).await
                 }
 
                 while let Ok(next_page) = rx_pending_send.try_recv() {
@@ -204,5 +243,24 @@ impl Controller {
         }
 
         return Some(page_config.unwrap().clone());
+    }
+
+    pub fn get_page_names(&self) -> Vec<String> {
+        return self.config.pages.keys().map(|x| x.to_string()).collect();
+    }
+
+    pub fn list_plugins(&self) -> Result<Vec<PluginIdentifier>> {
+        let mut plugins: Vec<PluginIdentifier> = Vec::new();
+
+        for (key, plugin) in &self.plugin_registry.plugins {
+            for (screen_key, _) in &plugin.screens {
+                plugins.push(PluginIdentifier {
+                    plugin_id: key.clone(),
+                    plugin_ref: screen_key.clone(),
+                });
+            }
+        }
+
+        return Ok(plugins);
     }
 }

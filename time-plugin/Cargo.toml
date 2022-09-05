@@ -13,3 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 loupedeck = { path = "../lib" }
 tokio = { version = "1", features = ["full"] }
+raqote = { version = "0.8.1", features = ["text"] }
+font-kit = "0.10.1"
+pathfinder_geometry = "0.5"
+time = { version = "0.3.11", features = ["formatting", "macros"] }

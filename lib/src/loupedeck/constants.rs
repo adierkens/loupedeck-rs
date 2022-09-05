@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 #[repr(u16)]
@@ -98,7 +98,7 @@ impl Button {
     }
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum Screen {
     Left,
@@ -112,6 +112,17 @@ impl From<Screen> for u16 {
             Screen::Left => 0x004C,
             Screen::Center => 0x0041,
             Screen::Right => 0x0052,
+        }
+    }
+}
+
+impl From<u8> for Screen {
+    fn from(value: u8) -> Screen {
+        match value {
+            0x4C => Screen::Left,
+            0x41 => Screen::Center,
+            0x52 => Screen::Right,
+            _ => panic!("Unknown screen: {}", value),
         }
     }
 }
@@ -279,3 +290,21 @@ pub enum Event {
 }
 
 pub static KEY_SIZE: u16 = 90;
+
+#[derive(Debug, Serialize, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub struct KeyLocation {
+    pub x: u8,
+    pub y: u8,
+}
+
+impl KeyLocation {
+    pub fn new(x: u8, y: u8) -> KeyLocation {
+        KeyLocation { x, y }
+    }
+
+    pub fn from_location(raw_x: u16, raw_y: u16) -> KeyLocation {
+        let x = ((raw_x - 60) / KEY_SIZE) as u8;
+        let y = (raw_y / KEY_SIZE) as u8;
+        KeyLocation { x, y }
+    }
+}

@@ -2,7 +2,7 @@ use std::io::Result;
 
 use raqote::DrawTarget;
 
-use crate::Screen;
+use crate::{KeyLocation, Screen, KEY_SIZE};
 
 #[macro_export]
 macro_rules! export_plugin {
@@ -18,8 +18,6 @@ macro_rules! export_plugin {
     };
 }
 
-pub struct LDPluginContext {}
-
 pub struct LDPluginRequirement {
     exclusive: bool,
 }
@@ -34,28 +32,48 @@ pub enum PluginType {
 pub struct PluginScreenContext {
     device_event_emitter: crate::ExternalDeviceEventEmitter,
     position: Screen,
-    index: u8,
+    key_id: KeyLocation,
 }
 
 impl PluginScreenContext {
     pub(crate) fn new(
         device_event_emitter: crate::ExternalDeviceEventEmitter,
         position: Screen,
-        index: u8,
+        key_id: KeyLocation,
     ) -> Self {
+        println!("PluginScreenContext::new {:?}", key_id);
+
         Self {
             position,
-            index,
+            key_id,
             device_event_emitter,
         }
     }
 
-    pub fn draw_target(&self, target: DrawTarget) -> Result<()> {
+    pub async fn draw_target(&self, target: DrawTarget) -> Result<()> {
+        let x: u16 = KEY_SIZE * (self.key_id.x as u16);
+        let y: u16 = KEY_SIZE * (self.key_id.y as u16);
+
+        self.device_event_emitter
+            .draw_target(self.position.clone(), x, y, KEY_SIZE, KEY_SIZE, target)
+            .await;
+
+        Ok(())
+    }
+
+    pub async fn draw_rgb565(&self, data: Vec<u8>) -> Result<()> {
+        let x: u16 = KEY_SIZE * (self.key_id.x as u16);
+        let y: u16 = KEY_SIZE * (self.key_id.y as u16);
+
+        self.device_event_emitter
+            .draw_rgb565(self.position.clone(), x, y, KEY_SIZE, KEY_SIZE, data)
+            .await;
+
         Ok(())
     }
 
     pub async fn vibrate(&self, level: crate::Haptic) -> Result<()> {
-        println!("Sending vibration: {:?}", level);
+        // println!("Sending vibration: {:?}", level);
         self.device_event_emitter.vibrate(level).await;
         Ok(())
     }

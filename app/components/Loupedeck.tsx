@@ -86,6 +86,19 @@ const LoupedeckButton = (props: SVGMotionProps<SVGCircleElement>) => {
   );
 };
 
+const Loupedeck_Knob_Variants: Array<{
+  id: string;
+  cx: string;
+  cy: string;
+}> = [
+  { id: "Knob5", cx: "636.16", cy: "295.029" },
+  { id: "Knob4", cx: "636.16", cy: "185.194" },
+  { id: "Knob3", cx: "635.275", cy: "74.4736" },
+  { id: "Knob2", cx: "59.5273", cy: "295.915" },
+  { id: "Knob1", cx: "59.5273", cy: "186.08" },
+  { id: "Knob0", cx: "58.6415", cy: "75.3593" },
+];
+
 export const Loupedeck = () => {
   return (
     <svg
@@ -105,12 +118,10 @@ export const Loupedeck = () => {
         stroke="black"
         strokeWidth="3"
       />
-      <LoupedeckKnob id="Knob5" cx="636.16" cy="295.029" />
-      <LoupedeckKnob id="Knob4" cx="636.16" cy="185.194" />
-      <LoupedeckKnob id="Knob3" cx="635.275" cy="74.4736" />
-      <LoupedeckKnob id="Knob2" cx="59.5273" cy="295.915" />
-      <LoupedeckKnob id="Knob1" cx="59.5273" cy="186.08" />
-      <LoupedeckKnob id="Knob0" cx="58.6415" cy="75.3593" />
+      {Loupedeck_Knob_Variants.map((v) => (
+        <LoupedeckKnob key={v.id} id={v.id} cx={v.cx} cy={v.cy} />
+      ))}
+
       <LoupedeckButton id="Circle7" cx="634.828" cy="379.865" />
       <path
         d="M632.396 385.365L637.6 375.07V374.979H631.6V373.729H639.055V375.047L633.873 385.365H632.396Z"

@@ -11,3 +11,18 @@ export interface EventUpdatePayload {
     tx_id: number;
   };
 }
+
+export interface PluginIdentifier {
+  plugin_id: string;
+  plugin_ref: string;
+}
+
+export interface PageConfig {
+  name: string;
+  screen: Array<[KeyLocation, PluginIdentifier]>;
+}
+
+export interface KeyLocation {
+  x: number;
+  y: number;
+}
